@@ -1,0 +1,71 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "NAME": "ظهرة لبن",
+        "EN_NAME": "Dhahrat Laban",
+        "POP": 12000,
+        "POP_M": 6000,
+        "POP_F": 6000
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [46.664, 24.814],
+            [46.670, 24.814],
+            [46.670, 24.818],
+            [46.664, 24.818],
+            [46.664, 24.814]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "NAME": "الصحافة",
+        "EN_NAME": "Al Sahafah",
+        "POP": 8000,
+        "POP_M": 4200,
+        "POP_F": 3800
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [46.697, 24.781],
+            [46.703, 24.781],
+            [46.703, 24.785],
+            [46.697, 24.785],
+            [46.697, 24.781]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "NAME": "حطين",
+        "EN_NAME": "Hittin",
+        "POP": 15000,
+        "POP_M": 7700,
+        "POP_F": 7300
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [46.715, 24.763],
+            [46.723, 24.763],
+            [46.723, 24.767],
+            [46.715, 24.767],
+            [46.715, 24.763]
+          ]
+        ]
+      }
+    }
+  ]
+}
