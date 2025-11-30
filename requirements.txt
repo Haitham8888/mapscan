@@ -1,0 +1,8 @@
+ipykernel
+opencv-python-headless
+matplotlib
+numpy
+scikit-learn
+onnxruntime
+Flask>=2.0
+requests
