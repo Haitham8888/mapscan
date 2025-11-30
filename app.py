@@ -1,18 +1,28 @@
-from flask import Flask
-from routes.city import city_bp
-from routes.district import district_bp
-from routes.region import region_bp
+# app.py
+from flask import Flask, render_template
+from config import Config
+from routes import register_routes
 
-app = Flask(__name__)
 
-# register blueprints
-app.register_blueprint(city_bp)
-app.register_blueprint(district_bp)
-app.register_blueprint(region_bp)
+def create_app():
+    app = Flask(__name__)
+    app.config.from_object(Config)
 
-@app.route("/")
-def home():
-    return {"status": "OK", "message": "DB2 + Flask API Ready"}
+    # تسجيل الراوتات
+    register_routes(app)
+
+    @app.route("/")
+    def index():
+        return render_template("map.html")
+
+    @app.route("/map")
+    def map_view():
+        return render_template("map.html")
+
+    return app
+
 
 if __name__ == "__main__":
+    app = create_app()
+    # شغّل على بورت 5001 زي ما كنت تستخدم
     app.run(host="0.0.0.0", port=5001, debug=True)

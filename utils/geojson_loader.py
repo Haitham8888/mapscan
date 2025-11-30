@@ -1,24 +1,28 @@
+# utils/geojson_loader.py
 import json
-import os
-
-# Base folder for geojson files (relative to project root)
-BASE_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'geojson'))
+from typing import List
 
 
-def load_geojson(file_name):
-    path = os.path.join(BASE_PATH, file_name)
-    if not os.path.isfile(path):
-        return {"features": []}
-
-    with open(path, "r", encoding="utf-8") as f:
-        try:
+def load_names_from_geojson(path: str, name_field: str) -> List[str]:
+    """
+    قراءة أسماء (مناطق/مدن/أحياء) من ملف GeoJSON وإرجاع قائمة أسماء بدون تكرار.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        except Exception:
-            return {"features": []}
+    except FileNotFoundError:
+        return []
+    except json.JSONDecodeError:
+        return []
 
-    if isinstance(data, dict) and "features" in data and isinstance(data["features"], list):
-        return data
-    # Some files contain a list of features
-    if isinstance(data, list):
-        return {"features": data}
-    return {"features": []}
+    features = data.get("features", [])
+    names = set()
+
+    for feat in features:
+        props = feat.get("properties", {})
+        name = props.get(name_field)
+        if isinstance(name, str) and name.strip():
+            names.add(name.strip())
+
+    # نرجّعها مرتبة
+    return sorted(names)

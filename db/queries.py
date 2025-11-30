@@ -1,56 +1,43 @@
-from db.db2 import get_db2_connection
-from config import POPULATION_TABLE
+# db/queries.py
+from typing import Optional
+from config import Config
+from .db2 import get_db2_connection
 
 
-def fetch_population(region_id=None, city_id=None, district_id=None):
+def get_population(region_id: Optional[int] = None,
+                   city_id: Optional[int] = None,
+                   district_id: Optional[int] = None) -> Optional[int]:
+    """
+    يرجع مجموع POP_TOTAL حسب الفلاتر المعطاة.
+    إذا الكل None يرجّع مجموع المملكة كاملة.
+    """
+    table = Config.POPULATION_TABLE
+    where_clauses = []
+    params = []
+
+    if region_id is not None:
+        where_clauses.append("REGION_ID = ?")
+        params.append(region_id)
+    if city_id is not None:
+        where_clauses.append("CITY_ID = ?")
+        params.append(city_id)
+    if district_id is not None:
+        where_clauses.append("DISTRICT_ID = ?")
+        params.append(district_id)
+
+    where_sql = ""
+    if where_clauses:
+        where_sql = " WHERE " + " AND ".join(where_clauses)
+
+    sql = f"SELECT SUM(POP_TOTAL) AS total_pop FROM {table}{where_sql}"
+
     conn = get_db2_connection()
-    cur = conn.cursor()
-
     try:
-        if district_id:
-            sql = f"""SELECT POP_M, POP_F, POP_TOTAL 
-                      FROM {POPULATION_TABLE}
-                      WHERE DISTRICT_ID = ?
-                      FETCH FIRST 1 ROWS ONLY"""
-            params = [district_id]
-
-        elif city_id:
-            sql = f"""SELECT POP_M, POP_F, POP_TOTAL 
-                      FROM {POPULATION_TABLE}
-                      WHERE CITY_ID = ?
-                      FETCH FIRST 1 ROWS ONLY"""
-            params = [city_id]
-
-        elif region_id:
-            sql = f"""SELECT POP_M, POP_F, POP_TOTAL 
-                      FROM {POPULATION_TABLE}
-                      WHERE REGION_ID = ?
-                      FETCH FIRST 1 ROWS ONLY"""
-            params = [region_id]
-        else:
-            return None
-
+        cur = conn.cursor()
         cur.execute(sql, params)
         row = cur.fetchone()
+        if row and row[0] is not None:
+            return int(row[0])
+        return None
     finally:
-        try:
-            cur.close()
-        except Exception:
-            pass
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-    if not row:
-        return None
-
-    # row may be tuple-like
-    try:
-        return {
-            "population_male": float(row[0]) if row[0] is not None else 0.0,
-            "population_female": float(row[1]) if row[1] is not None else 0.0,
-            "population_total": float(row[2]) if row[2] is not None else 0.0,
-        }
-    except Exception:
-        return None
+        conn.close()

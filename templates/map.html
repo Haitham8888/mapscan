@@ -1,883 +1,174 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="initial-scale=1, maximum-scale=1,user-scalable=no" />
-    <title>Neighborhood Stats (ESRI)</title>
-    <link href="https://js.arcgis.com/4.27/esri/themes/light/main.css" rel="stylesheet">
-    <script src="https://js.arcgis.com/4.27/"></script>
-    <style>
-      html, body, #viewDiv { height: 100%; margin: 0; padding: 0; }
-      /* Responsive search panel styles */
-      .search-panel { box-sizing: border-box; }
-      .search-panel .panel-inner { position: fixed; top: 10px; right: 10px; z-index: 210; width: min(380px, 96vw); max-width: 420px; max-height: calc(100vh - 20px); overflow: hidden; border-radius: 8px; }
-      .search-panel .panel-card { display:flex; flex-direction:column; background:#fff; box-shadow:0 8px 30px rgba(0,0,0,0.12); border-radius:8px; height:100%; overflow:hidden; }
-      .search-panel .panel-body { padding:12px; }
-      .search-panel .panel-results { border-top:1px solid #edf2f7; background:#fff; max-height:calc(100vh - 220px); overflow:auto; }
-      /* Suggestions list fixed within panel results */
-      #suggestionsList { max-height:260px; overflow:auto; }
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8" />
+    <title>الخريطة السعودية</title>
+    <link rel="stylesheet" href="/static/map.css" />
+    <script src="https://js.arcgis.com/4.28/"></script>
+</head>
+<body>
+    <div id="dropdown-container">
+        <label for="regions-dropdown">المناطق:</label>
+        <select id="regions-dropdown">
+            <option value="">اختر منطقة</option>
+        </select>
 
-      /* Mobile: make panel full-width bottom sheet */
-      @media (max-width: 640px) {
-        .search-panel .panel-inner { left: 2%; right: 2%; top: 8px; width: 96vw; max-width: 96vw; }
-        .search-panel .panel-results { max-height: calc(100vh - 200px); }
-      }
+        <label for="cities-dropdown">المدن:</label>
+        <select id="cities-dropdown">
+            <option value="">اختر مدينة</option>
+        </select>
 
-      #results { margin-top: 8px; }
-    </style>
-  </head>
-  <body>
-    <div id="viewDiv"></div>
-    <div id="panel" class="search-panel">
-      <div class="panel-inner">
-        <div class="panel-card">
-          <div class="panel-body">
-            <div style="display:flex; flex-direction:column; gap:8px;">
-              <!-- geocoder removed per request -->
-              <!-- Quick search input -->
-              <div style="width:100%;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <div data-test-icon="icon-search" class="icon-search" style="color:#6b7280; font-size:18px"></div>
-                  <input id="quickSearch" placeholder="بحث سريع (اسم الحي/المدينة)" autocomplete="off" style="flex:1 1 100%; padding:8px; border:1px solid #e5e7eb; border-radius:6px" />
-                  <button id="quickClear" title="مسح" style="background:transparent; border:0; cursor:pointer; color:#6b7280">✕</button>
-                </div>
-                <div id="quickResults" style="margin-top:8px; display:none; border:1px solid #f1f5f9; border-radius:6px; background:#fff; max-height:260px; overflow:auto"></div>
-              </div>
-              <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:stretch;">
-                <input id="regionInput" list="regionsList" placeholder="المنطقة" style="flex:1 1 120px; min-width:120px; padding:8px; border:1px solid #e5e7eb; border-radius:6px" />
-                <input id="cityInput" list="citiesList" placeholder="المدينة" style="flex:1 1 120px; min-width:120px; padding:8px; border:1px solid #e5e7eb; border-radius:6px" />
-                <input id="districtInput" list="districtsList" placeholder="الحي/المنطقة" style="flex:1 1 120px; min-width:120px; padding:8px; border:1px solid #e5e7eb; border-radius:6px" />
-              </div>
-              <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                <label style="font-size:13px; display:flex; align-items:center; gap:8px;"><input id="cityPointToggle" type="checkbox" checked /> علم على المدينة بنقطة</label>
-                <button id="btn" style="background:#111827; color:#fff; padding:8px 12px; border-radius:6px; border:0; cursor:pointer">بحث</button>
-              </div>
-            </div>
-          </div>
-          <div class="panel-results">
-              <div id="results" style="padding:12px; font-size:13px; color:#374151;">نتائج البحث ستظهر هنا</div>
-          </div>
-        </div>
-      </div>
-      <datalist id="regionsList"></datalist>
-      <datalist id="citiesList"></datalist>
-      <datalist id="districtsList"></datalist>
+        <label for="districts-dropdown">الأحياء:</label>
+        <select id="districts-dropdown">
+            <option value="">اختر حي</option>
+        </select>
     </div>
 
+    <div id="viewDiv"></div>
+
     <script>
-      require([
-        "esri/Map",
-        "esri/views/MapView",
-        "esri/layers/GraphicsLayer",
-        "esri/Graphic",
-        "esri/geometry/Polygon",
-        "esri/symbols/SimpleFillSymbol"
-      ], function(Map, MapView, GraphicsLayer, Graphic, Polygon, SimpleFillSymbol) {
-        const map = new Map({ basemap: 'streets-vector' });
-        const view = new MapView({ container: 'viewDiv', map: map, center: [46.7, 24.7], zoom: 11 });
-        const highlightLayer = new GraphicsLayer();
-        map.add(highlightLayer);
-
-        function clearHighlight() {
-          highlightLayer.removeAll();
-        }
-
-        // Helper: draw a GeoJSON Point or Polygon/MultiPolygon feature onto highlightLayer
-        function drawGeoJSONFeature(feat) {
-          if (!feat || !feat.geometry) return false;
-          const geom = feat.geometry;
-
-          function addPolygonFromCoordinates(coordinates) {
-            try {
-              if (!coordinates) return false;
-              let rings = [];
-              function isNumPair(a) { return Array.isArray(a) && a.length >= 2 && typeof a[0] === 'number' && typeof a[1] === 'number'; }
-              if (Array.isArray(coordinates) && coordinates.length && isNumPair(coordinates[0])) {
-                const ring = coordinates.map(pt => { if (pt.length >= 2 && Math.abs(pt[0]) <= 180 && Math.abs(pt[1]) <= 90) return [pt[0], pt[1]]; return [pt[1], pt[0]]; });
-                rings = [ring];
-              } else if (Array.isArray(coordinates) && coordinates.length && Array.isArray(coordinates[0])) {
-                if (isNumPair(coordinates[0][0])) {
-                  rings = coordinates.map(ring => ring.map(pt => isNumPair(pt) && Math.abs(pt[0]) <= 180 && Math.abs(pt[1]) <= 90 ? [pt[0], pt[1]] : [pt[1], pt[0]]));
-                } else if (Array.isArray(coordinates[0]) && Array.isArray(coordinates[0][0])) {
-                  rings = coordinates[0].map(ring => ring.map(pt => isNumPair(pt) && Math.abs(pt[0]) <= 180 && Math.abs(pt[1]) <= 90 ? [pt[0], pt[1]] : [pt[1], pt[0]]));
-                }
-              }
-              if (!rings.length) return false;
-              const polygon = new Polygon({ rings: rings, spatialReference: { wkid: 4326 } });
-              const fill = new SimpleFillSymbol({ color: [227, 139, 79, 0.35], outline: { color: [255, 140, 0], width: 1 } });
-              const graphic = new Graphic({ geometry: polygon, symbol: fill });
-              highlightLayer.add(graphic);
-              return polygon;
-            } catch (err) { console.error('addPolygon error', err); return false; }
-          }
-
-          if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
-            const poly = addPolygonFromCoordinates(geom.coordinates);
-            if (poly) return poly;
-            return null;
-          }
-          if (geom.type === 'Point') {
-            const lon = geom.coordinates[0];
-            const lat = geom.coordinates[1];
-            const marker = new Graphic({ geometry: { type: 'point', longitude: lon, latitude: lat }, symbol: { type: 'simple-marker', color: 'red', size: 8 } });
-            highlightLayer.add(marker);
-            return { center: [lon, lat] };
-          }
-          if (geom.type === 'GeometryCollection') {
-            const geoms = geom.geometries || [];
-            for (let i = 0; i < geoms.length; i++) {
-              const out = drawGeoJSONFeature({ geometry: geoms[i] });
-              if (out) return out;
-            }
-          }
-          return null;
-        }
-
-        // Draw multiple features (FeatureCollection)
-        async function drawFeatureCollection(feats) {
-          clearHighlight();
-          if (!feats || !feats.length) return;
-          let firstTarget = null;
-          for (const f of feats) {
-            const out = drawGeoJSONFeature(f);
-            if (!firstTarget && out) firstTarget = out;
-          }
-          // zoom to first polygon or marker if available
-          try {
-            if (firstTarget && firstTarget instanceof Polygon) {
-              view.goTo({ target: firstTarget, zoom: 12 });
-            } else if (firstTarget && firstTarget.center) {
-              view.goTo({ center: firstTarget.center, zoom: 12 });
-            }
-          } catch (e) { console.error('goTo error', e); }
-        }
-
-        function showFeatureAndTable(json) {
-          clearHighlight();
-          if (!json || !json.feature) {
-            document.getElementById('results').innerText = 'No geometry returned.';
-            return;
-          }
-          const feat = json.feature;
-          const geom = feat && feat.geometry;
-          if (!geom) {
-            document.getElementById('results').innerText = 'Feature has no geometry.';
-            return;
-          }
-
-          // Helper to add a polygon/multipolygon to the layer
-          function addPolygonFromCoordinates(coordinates) {
-            // Build normalized rings: array of rings, each ring is [[lon,lat], ...]
-            try {
-              if (!coordinates) return false;
-              let rings = [];
-
-              // Helper to test if an item is a numeric coordinate pair
-              function isNumPair(a) {
-                return Array.isArray(a) && a.length >= 2 && typeof a[0] === 'number' && typeof a[1] === 'number';
-              }
-
-              // If coordinates is a flat ring: [[x,y],[x,y],...]
-              if (Array.isArray(coordinates) && coordinates.length && isNumPair(coordinates[0])) {
-                // convert possible [lat,lon] -> [lon,lat] if lat seems larger than lon
-                const ring = coordinates.map(function(pt) {
-                  if (pt.length >= 2 && Math.abs(pt[0]) <= 180 && Math.abs(pt[1]) <= 90) {
-                    // likely [lon, lat]
-                    return [pt[0], pt[1]];
-                  }
-                  // swap otherwise
-                  return [pt[1], pt[0]];
+        // تعبئة القوائم المنسدلة من الـ API
+        function populateDropdown(api, elementId) {
+            fetch(api)
+                .then(res => res.json())
+                .then(data => {
+                    const select = document.getElementById(elementId);
+                    select.innerHTML = "<option value=''>اختر</option>";
+                    data.forEach(name => {
+                        if (name) {
+                            select.innerHTML += `<option value="${name}">${name}</option>`;
+                        }
+                    });
+                })
+                .catch(err => {
+                    console.error("Error loading", api, err);
                 });
-                rings = [ring];
-              } else if (Array.isArray(coordinates) && coordinates.length && Array.isArray(coordinates[0])) {
-                // Could be rings (array of rings) or multipolygon
-                // Detect if first element is a ring (array of pairs)
-                if (isNumPair(coordinates[0][0])) {
-                  // coordinates is rings
-                  rings = coordinates.map(function(ring) {
-                    return ring.map(function(pt) {
-                      if (isNumPair(pt) && Math.abs(pt[0]) <= 180 && Math.abs(pt[1]) <= 90) return [pt[0], pt[1]];
-                      if (isNumPair(pt)) return [pt[1], pt[0]];
-                      // if pt is object {lat, lon}
-                      if (pt && typeof pt === 'object' && ('lat' in pt || 'latitude' in pt)) {
-                        const lat = pt.lat || pt.latitude || pt[1];
-                        const lon = pt.lon || pt.longitude || pt.longitude || pt[0];
-                        return [lon, lat];
-                      }
-                      return pt;
-                    }).filter(Boolean);
-                  });
-                } else if (Array.isArray(coordinates[0]) && Array.isArray(coordinates[0][0])) {
-                  // MultiPolygon -> take first polygon's rings
-                  rings = coordinates[0].map(function(ring) {
-                    return ring.map(function(pt) { return isNumPair(pt) ? (Math.abs(pt[0]) <= 180 && Math.abs(pt[1]) <= 90 ? [pt[0], pt[1]] : [pt[1], pt[0]]) : pt; });
-                  });
-                }
-              }
-
-              if (!rings.length) return false;
-
-              const polygon = new Polygon({ rings: rings, spatialReference: { wkid: 4326 } });
-              const fill = new SimpleFillSymbol({ color: [227, 139, 79, 0.5], outline: { color: [255, 140, 0], width: 2 } });
-              const graphic = new Graphic({ geometry: polygon, symbol: fill });
-              highlightLayer.add(graphic);
-              view.goTo({ target: polygon, zoom: 12 });
-              return true;
-            } catch (err) {
-              console.error('addPolygonFromCoordinates error', err, coordinates);
-              return false;
-            }
-          }
-
-          // Handle geometry types
-          const gtype = geom.type;
-          if (gtype === 'Polygon') {
-            if (!addPolygonFromCoordinates(geom.coordinates)) {
-              document.getElementById('results').innerText = 'Polygon geometry could not be drawn.';
-              return;
-            }
-          } else if (gtype === 'MultiPolygon') {
-            if (!addPolygonFromCoordinates(geom.coordinates)) {
-              document.getElementById('results').innerText = 'MultiPolygon geometry could not be drawn.';
-              return;
-            }
-          } else if (gtype === 'GeometryCollection') {
-            // find the first polygon/multipolygon/point
-            const geoms = geom.geometries || [];
-            let drawn = false;
-            for (let i = 0; i < geoms.length; i++) {
-              const gg = geoms[i];
-              if (gg.type === 'Polygon' || gg.type === 'MultiPolygon') {
-                drawn = addPolygonFromCoordinates(gg.coordinates);
-                if (drawn) break;
-              } else if (gg.type === 'Point') {
-                const pt = { type: 'point', longitude: gg.coordinates[0], latitude: gg.coordinates[1] };
-                const marker = new Graphic({ geometry: pt, symbol: { type: 'simple-marker', color: 'red', size: 8 } });
-                highlightLayer.add(marker);
-                view.goTo({ center: [gg.coordinates[0], gg.coordinates[1]], zoom: 13 });
-                drawn = true;
-                break;
-              }
-            }
-            if (!drawn) {
-              document.getElementById('results').innerText = 'GeometryCollection contains no drawable polygon/point.';
-              return;
-            }
-          } else if (gtype === 'Point') {
-            // For point features, allow marking the city with a point (user toggle)
-            const lon = geom.coordinates[0];
-            const lat = geom.coordinates[1];
-
-            const usePoint = document.getElementById('cityPointToggle') && document.getElementById('cityPointToggle').checked;
-
-            if (usePoint) {
-              // Draw a simple marker at the city center
-              const pt = { type: 'point', longitude: lon, latitude: lat };
-              const marker = new Graphic({ geometry: pt, symbol: { type: 'simple-marker', color: 'red', size: 10 } });
-              highlightLayer.add(marker);
-              view.goTo({ center: [lon, lat], zoom: 13 });
-            } else {
-              // Draw approximate circular boundary (fallback)
-              function createCircle(lon, lat, radiusMeters = 5000, points = 64) {
-                const latFactor = 111320;
-                const lonFactor = 40075000 * Math.cos(lat * Math.PI / 180) / 360;
-                const latStep = radiusMeters / latFactor;
-                const lonStep = radiusMeters / lonFactor;
-                const ring = [];
-                for (let i = 0; i < points; i++) {
-                  const theta = (i / points) * (Math.PI * 2);
-                  const dx = Math.cos(theta) * lonStep;
-                  const dy = Math.sin(theta) * latStep;
-                  ring.push([lon + dx, lat + dy]);
-                }
-                if (ring.length && (ring[0][0] !== ring[ring.length-1][0] || ring[0][1] !== ring[ring.length-1][1])) {
-                  ring.push(ring[0]);
-                }
-                return ring;
-              }
-              const ring = createCircle(lon, lat, 5000, 128);
-              const polygon = new Polygon({ rings: [ring], spatialReference: { wkid: 4326 } });
-              const fill = new SimpleFillSymbol({ color: [227, 139, 79, 0.35], outline: { color: [255, 140, 0], width: 2 } });
-              const graphic = new Graphic({ geometry: polygon, symbol: fill });
-              highlightLayer.add(graphic);
-              view.goTo({ target: polygon, zoom: 12 });
-            }
-          } else {
-            // attempt to interpret coordinates as polygon rings
-            if (!addPolygonFromCoordinates(geom.coordinates)) {
-              document.getElementById('results').innerText = 'Unsupported geometry type: ' + gtype;
-              return;
-            }
-          }
-
-          // build results table with male/female
-          const male = json.population_male || 0;
-          const female = json.population_female || 0;
-          const total = json.population_total || (male + female);
-          const html = `
-            <strong>${json.neighborhood}</strong>
-            <table style="width:100%; margin-top:8px; border-collapse:collapse; font-size:13px;">
-              <tr><td style="padding:4px; border-bottom:1px solid #ddd">Male</td><td style="padding:4px; border-bottom:1px solid #ddd; text-align:right">${male}</td></tr>
-              <tr><td style="padding:4px; border-bottom:1px solid #ddd">Female</td><td style="padding:4px; border-bottom:1px solid #ddd; text-align:right">${female}</td></tr>
-              <tr><td style="padding:4px; font-weight:bold">Total</td><td style="padding:4px; font-weight:bold; text-align:right">${total}</td></tr>
-            </table>
-          `;
-          document.getElementById('results').innerHTML = html;
         }
 
-        document.getElementById('btn').addEventListener('click', async () => {
-          // Prefer district lookup, then city, otherwise perform a broad search across files
-          const districtInput = document.getElementById('districtInput');
-          const cityInput = document.getElementById('cityInput');
-          const regionInput = document.getElementById('regionInput');
-          const districtVal = districtInput.value && districtInput.value.trim();
-          const cityVal = cityInput.value && cityInput.value.trim();
-
-          try {
-            if (districtVal) {
-              // prefer stored district id if available
-              let districtIdStored = districtInput.dataset && districtInput.dataset.districtId ? districtInput.dataset.districtId : null;
-              const cityIdStored = cityInput.dataset && cityInput.dataset.cityId ? cityInput.dataset.cityId : null;
-              // attempt to resolve district id from cached districtsByName if dataset not set
-              if (!districtIdStored) {
-                if (districtsByName[districtVal] && districtsByName[districtVal].id) districtIdStored = districtsByName[districtVal].id;
-                else {
-                  for (const key in districtsByName) {
-                    const d = districtsByName[key];
-                    if ((d.name_ar && String(d.name_ar).trim() === String(districtVal).trim()) || (d.name_en && String(d.name_en).trim() === String(districtVal).trim())) { districtIdStored = d.id; break; }
-                    if (String(key).trim() === String(districtVal).trim()) { districtIdStored = d.id; break; }
-                  }
-                }
-              }
-              let params = '';
-              if (districtIdStored) {
-                params = `?district_id=${encodeURIComponent(districtIdStored)}` + (cityIdStored ? `&city_id=${encodeURIComponent(cityIdStored)}` : '');
-              } else if (cityIdStored) {
-                params = `?city_id=${encodeURIComponent(cityIdStored)}&district_name=${encodeURIComponent(districtVal)}`;
-              } else if (cityVal) {
-                // use city name + district name
-                params = `?city_name=${encodeURIComponent(cityVal)}&district_name=${encodeURIComponent(districtVal)}`;
-              } else {
-                params = `?district_name=${encodeURIComponent(districtVal)}`;
-              }
-              const res = await fetch('/stats_district' + params);
-              if (!res.ok) {
-                clearHighlight();
-                const text = await res.text();
-                document.getElementById('results').innerText = text || 'District not found';
-                return;
-              }
-              const data = await res.json();
-              clearHighlight();
-              showFeatureAndTable(data);
-              return;
-            }
-
-            if (cityVal) {
-              // call stats_city using id if available else name
-              let cityIdStored = cityInput.dataset && cityInput.dataset.cityId ? cityInput.dataset.cityId : null;
-              // attempt to resolve id from cached citiesByName if dataset wasn't set (user may have clicked search quickly)
-              if (!cityIdStored) {
-                // exact match first
-                if (citiesByName[cityVal] && citiesByName[cityVal].id) cityIdStored = citiesByName[cityVal].id;
-                else {
-                  // try matching by contained/trimmed names
-                  for (const key in citiesByName) {
-                    const c = citiesByName[key];
-                    if ((c.name_ar && String(c.name_ar).trim() === String(cityVal).trim()) || (c.name_en && String(c.name_en).trim() === String(cityVal).trim())) { cityIdStored = c.id; break; }
-                    if (String(key).trim() === String(cityVal).trim()) { cityIdStored = c.id; break; }
-                  }
-                }
-              }
-              const regionIdStored = regionInput.dataset && regionInput.dataset.regionId ? regionInput.dataset.regionId : null;
-              const regionValStored = regionInput.value && regionInput.value.trim() ? regionInput.value.trim() : null;
-              let params = cityIdStored ? `?city_id=${encodeURIComponent(cityIdStored)}` : `?city_name=${encodeURIComponent(cityVal)}`;
-              if (regionIdStored) params += `&region_id=${encodeURIComponent(regionIdStored)}`;
-              else if (regionValStored) params += `&region_name=${encodeURIComponent(regionValStored)}`;
-              const res = await fetch('/stats_city' + params);
-              if (!res.ok) {
-                clearHighlight();
-                const text = await res.text();
-                document.getElementById('results').innerText = text || 'City not found';
-                return;
-              }
-              const data = await res.json();
-              clearHighlight();
-              showFeatureAndTable(data);
-              return;
-            }
-
-            // Fallback: perform a region-only lookup (supports region id or name)
-            const regionVal = regionInput.value && regionInput.value.trim();
-            if (!regionVal) return alert('اختر المدينة أو الحي لإجراء البحث');
-            const regionIdStored = regionInput.dataset && regionInput.dataset.regionId ? regionInput.dataset.regionId : null;
-            const paramsRegion = regionIdStored ? `?region_id=${encodeURIComponent(regionIdStored)}` : `?region_name=${encodeURIComponent(regionVal)}`;
-            const res = await fetch('/stats_region' + paramsRegion);
-            const text = await res.text();
-            let data = null;
-            try { data = text ? JSON.parse(text) : null; } catch (e) { data = { __raw: text }; }
-            if (res.ok) {
-              clearHighlight();
-              showFeatureAndTable(data);
-            } else {
-              clearHighlight();
-              document.getElementById('results').innerText = (data && data.__raw) ? data.__raw : JSON.stringify(data);
-            }
-          } catch (err) {
-            clearHighlight();
-            document.getElementById('results').innerText = 'Error: ' + (err && err.message ? err.message : String(err));
-          }
+        window.addEventListener("load", function () {
+            populateDropdown("/api/regions", "regions-dropdown");
+            populateDropdown("/api/cities", "cities-dropdown");
+            populateDropdown("/api/districts", "districts-dropdown");
         });
 
-        // Cascading searchable inputs using datalist + in-memory maps
-        const regionsByName = {}; // displayName -> props
-        const regionsById = {};   // id -> {name_en, name_ar, display}
-        const citiesByName = {};
-        const districtsByName = {};
+        // كود الخريطة ArcGIS
+        require([
+            "esri/Map",
+            "esri/views/MapView",
+            "esri/layers/GeoJSONLayer",
+            "esri/widgets/Search"
+        ], function (Map, MapView, GeoJSONLayer, Search) {
 
-        function setDatalist(datalistId, items) {
-          const dl = document.getElementById(datalistId);
-          if (!dl) return;
-          dl.innerHTML = '';
-          items.forEach(it => {
-            const opt = document.createElement('option');
-            // set both value and visible text so dropdown shows full label in supporting browsers
-            opt.value = it.display;
-            try { opt.textContent = it.display; } catch (e) {}
-            // store meta if provided
-            if (it.meta) {
-              for (const k in it.meta) opt.dataset[k] = it.meta[k];
-            }
-            dl.appendChild(opt);
-          });
-        }
+            // IMPORTANT: لازم تكون نفس أسماء الحقول اللي في GeoJSON
+            const REGION_NAME_FIELD   = "name_ar";
+            const CITY_NAME_FIELD     = "name_ar";
+            const DISTRICT_NAME_FIELD = "name_ar";
 
-        // Helper: read dataset/meta from a datalist's option matching a value
-        function getDatalistMeta(datalistId, value) {
-          try {
-            const dl = document.getElementById(datalistId);
-            if (!dl || !value) return null;
-            const opts = dl.children;
-            for (let i = 0; i < opts.length; i++) {
-              const o = opts[i];
-              if (o.value === value) {
-                // copy dataset to a plain object
-                const out = {};
-                for (let k = 0; k < o.attributes.length; k++) {
-                  const attr = o.attributes[k];
-                  if (attr.name.startsWith('data-')) {
-                    const name = attr.name.slice(5);
-                    out[name] = attr.value;
-                  }
-                }
-                return out;
-              }
-            }
-          } catch (e) { console.error('getDatalistMeta error', e); }
-          return null;
-        }
-
-        async function loadRegions() {
-          try {
-            const res = await fetch('/list_regions');
-            const data = await res.json();
-            const items = (data.regions || []).map(r => {
-              const name_ar = r.name_ar || '';
-              const name_en = r.name_en || '';
-              const rid = r.id || '';
-              // display without numeric id
-              const display = `${name_ar}${name_en ? (' — ' + name_en) : ''}`.trim();
-              regionsByName[display] = { id: rid, name_en: name_en, name_ar: name_ar };
-              if (rid !== undefined && rid !== null && String(rid) !== '') {
-                regionsById[String(rid)] = { id: rid, name_en: name_en, name_ar: name_ar, display };
-              }
-              return { display, meta: { id: rid } };
-            });
-            setDatalist('regionsList', items);
-          } catch (e) { console.error(e); }
-        }
-
-        async function loadCitiesForRegion(regionIdOrName) {
-          try {
-            const params = regionIdOrName && String(regionIdOrName).match(/^\d+$/) ? `?region_id=${regionIdOrName}` : `?region_name=${encodeURIComponent(regionIdOrName)}`;
-            const res = await fetch('/list_cities' + (params || ''));
-            const data = await res.json();
-            const items = (data.cities || []).map(c => {
-              const name_ar = c.name_ar || c.name || '';
-              const name_en = c.name_en || c.name || '';
-              const cid = c.id || c.city_id || '';
-              // display without numeric id
-              const display = `${name_ar}${name_en ? (' — ' + name_en) : ''}`.trim();
-              citiesByName[display] = { id: cid, name_en: name_en, name_ar: name_ar, props: c };
-              return { display, meta: { id: cid } };
-            });
-            setDatalist('citiesList', items);
-            // clear districts list
-            setDatalist('districtsList', []);
-            // clear maps for districts
-            for (const k in districtsByName) delete districtsByName[k];
-          } catch (e) { console.error(e); }
-        }
-
-        async function loadDistrictsForCity(cityIdOrName) {
-          try {
-            const params = cityIdOrName && String(cityIdOrName).match(/^\d+$/) ? `?city_id=${cityIdOrName}` : `?city_name=${encodeURIComponent(cityIdOrName)}`;
-            const res = await fetch('/list_districts' + (params || ''));
-            const data = await res.json();
-            const items = (data.districts || []).map(d => {
-              const name_ar = d.name_ar || d.name || '';
-              const name_en = d.name_en || d.name || '';
-              const did = d.id || d.district_id || '';
-              // display without numeric id
-              const display = `${name_ar}${name_en ? (' — ' + name_en) : ''}`.trim();
-              // store canonical mapping so when user selects the display we know its ids
-              districtsByName[display] = { id: did, name_en: name_en, name_ar: name_ar, props: d };
-              return { display, meta: { id: did } };
-            });
-            setDatalist('districtsList', items);
-
-            // If no districts returned, draw the selected city boundary instead
-            if (!(data.districts || []).length) {
-              try {
-                  const cityText = document.getElementById('cityInput').value || cityIdOrName;
-                  if (cityText) {
-                    const isId = String(cityText).match(/^\d+$/);
-                    const regionIdStored = document.getElementById('regionInput').dataset && document.getElementById('regionInput').dataset.regionId ? document.getElementById('regionInput').dataset.regionId : null;
-                    const regionValStored = document.getElementById('regionInput').value && document.getElementById('regionInput').value.trim() ? document.getElementById('regionInput').value.trim() : null;
-                    let params = isId ? `?city_id=${cityText}` : `?city_name=${encodeURIComponent(cityText)}`;
-                    if (regionIdStored) params += `&region_id=${encodeURIComponent(regionIdStored)}`;
-                    else if (regionValStored) params += `&region_name=${encodeURIComponent(regionValStored)}`;
-                    const r = await fetch('/stats_city' + params);
-                    if (r.ok) {
-                      const d = await r.json();
-                      clearHighlight();
-                      showFeatureAndTable(d);
+            // طبقات GeoJSON
+            const regionsLayer = new GeoJSONLayer({
+                url: "/static/geojson/regions.geojson",
+                title: "المناطق",
+                outFields: ["*"],
+                renderer: {
+                    type: "simple",
+                    symbol: {
+                        type: "simple-fill",
+                        color: [46, 204, 64, 0.35],
+                        outline: {
+                            color: [0, 100, 0, 1],
+                            width: 1
+                        }
                     }
-                  }
-              } catch (e) { console.error('auto-search city error', e); }
-            }
-          } catch (e) { console.error(e); }
-        }
-
-        // Suggestions removed (geocoder was removed per user request)
-
-        // Event wiring for inputs
-        document.getElementById('regionInput').addEventListener('input', function(e) {
-          const v = this.value;
-          // clear downstream selections when region changes
-          const cityInput = document.getElementById('cityInput');
-          const districtInput = document.getElementById('districtInput');
-          cityInput.value = '';
-          districtInput.value = '';
-          delete cityInput.dataset.cityId;
-          delete districtInput.dataset.districtId;
-
-          if (!v) return;
-          // if value exactly matches a datalist option, prefer the numeric region id meta
-          const meta = getDatalistMeta('regionsList', v);
-          if (meta && meta.id) {
-            this.dataset.regionId = String(meta.id);
-            loadCitiesForRegion(meta.id);
-          } else {
-            delete this.dataset.regionId;
-            loadCitiesForRegion(v);
-          }
-        });
-        document.getElementById('cityInput').addEventListener('input', function(e) {
-          const v = this.value;
-          // clear downstream district when city changes
-          const districtInput = document.getElementById('districtInput');
-          districtInput.value = '';
-          delete districtInput.dataset.districtId;
-
-          if (!v) return;
-          // prefer datalist meta id when available
-          const meta = getDatalistMeta('citiesList', v);
-          if (meta && meta.id) {
-            this.dataset.cityId = String(meta.id);
-            loadDistrictsForCity(meta.id);
-            // also fetch and draw all districts for this city so city-only selection shows boundaries
-            try {
-              (async () => {
-                const r = await fetch('/city_districts?city_id=' + encodeURIComponent(meta.id));
-                let data = null;
-                if (r.ok) {
-                  try { data = await r.json(); } catch (e) { data = null; }
                 }
-                // If we have districts, draw them. Otherwise fallback to drawing the city itself.
-                if (data && Array.isArray(data.features) && data.features.length) {
-                  drawFeatureCollection(data.features);
-                  const names = data.features.map(f => (f.properties && (f.properties.name_ar || f.properties.name_en)) || '').filter(Boolean);
-                  document.getElementById('results').innerHTML = `<strong>Districts (${names.length})</strong><div style="margin-top:8px; font-size:13px;">${names.slice(0,50).map(n => `<div>${n}</div>`).join('')}</div>`;
-                } else {
-                  // fallback: request /stats_city to draw city polygon/point
-                  const regionIdStored = regionInput.dataset && regionInput.dataset.regionId ? regionInput.dataset.regionId : null;
-                  const regionValStored = regionInput.value && regionInput.value.trim() ? regionInput.value.trim() : null;
-                  let params = `?city_id=${encodeURIComponent(meta.id)}`;
-                  if (regionIdStored) params += `&region_id=${encodeURIComponent(regionIdStored)}`;
-                  else if (regionValStored) params += `&region_name=${encodeURIComponent(regionValStored)}`;
-                  const rc = await fetch('/stats_city' + params);
-                  if (rc.ok) {
-                    const cd = await rc.json();
-                    clearHighlight();
-                    showFeatureAndTable(cd);
-                  } else {
-                    // show a helpful message
-                    document.getElementById('results').innerText = 'لا توجد أحياء معرفة لهذه المدينة. عرض حدود المدينة.';
-                    // still try to draw city via stats_city without region context
-                    try {
-                      const rc2 = await fetch('/stats_city?city_id=' + encodeURIComponent(meta.id));
-                      if (rc2.ok) {
-                        const cd2 = await rc2.json();
-                        clearHighlight();
-                        showFeatureAndTable(cd2);
-                      }
-                    } catch (e) { }
-                  }
-                }
-              })();
-            } catch (e) { console.error('draw city districts error', e); }
-          } else {
-            // try to find in cached citiesByName (fallback for prefix matches)
-            let match = citiesByName[v];
-            if (!match) {
-              for (const key in citiesByName) {
-                const c = citiesByName[key];
-                if ((c.name_ar && String(c.name_ar).trim() === String(v).trim()) || (c.name_en && String(c.name_en).trim() === String(v).trim())) { match = c; break; }
-                if (String(key).startsWith(String(v))) { match = c; break; }
-              }
-            }
-            if (match && match.id !== undefined && match.id !== null && String(match.id) !== '') {
-              this.dataset.cityId = String(match.id);
-            } else {
-              delete this.dataset.cityId;
-            }
-            loadDistrictsForCity(v);
-          }
-
-          // request and draw the city boundary (prefer polygon)
-          (async () => {
-            try {
-              const isId = String(v).match(/^\d+$/);
-              const regionIdStored = document.getElementById('regionInput').dataset && document.getElementById('regionInput').dataset.regionId ? document.getElementById('regionInput').dataset.regionId : null;
-              const regionValStored = document.getElementById('regionInput').value && document.getElementById('regionInput').value.trim() ? document.getElementById('regionInput').value.trim() : null;
-              let params = isId ? `?city_id=${v}` : `?city_name=${encodeURIComponent(v)}`;
-              if (regionIdStored) params += `&region_id=${encodeURIComponent(regionIdStored)}`;
-              else if (regionValStored) params += `&region_name=${encodeURIComponent(regionValStored)}`;
-              const res = await fetch('/stats_city' + params);
-              if (!res.ok) return;
-              const data = await res.json();
-              clearHighlight();
-              showFeatureAndTable(data);
-            } catch (e) { console.error('draw city error', e); }
-          })();
-        });
-        document.getElementById('districtInput').addEventListener('input', async function(e) {
-          const v = this.value;
-          if (!v) return;
-          // if this input value matches a known display entry, set its districtId for later
-          try {
-            let matched = districtsByName[v];
-            if (!matched) {
-              for (const key in districtsByName) {
-                const d = districtsByName[key];
-                if ((d.name_ar && String(d.name_ar).trim() === String(v).trim()) || (d.name_en && String(d.name_en).trim() === String(v).trim())) {
-                  matched = d; break;
-                }
-                if (String(key).startsWith(String(v))) { matched = d; break; }
-              }
-            }
-            if (matched && matched.id) {
-              this.dataset.districtId = String(matched.id);
-            } else {
-              delete this.dataset.districtId;
-            }
-          } catch (e) {}
-          // When a district is selected/typed, try to resolve within current city context
-          const cityVal = document.getElementById('cityInput').value;
-          try {
-            let params = '';
-            // prefer a numeric city id stored on the input for exact scoping
-            const cityInput = document.getElementById('cityInput');
-            const cityIdStored = cityInput && cityInput.dataset && cityInput.dataset.cityId ? cityInput.dataset.cityId : null;
-            // prefer a stored district id if available
-            const districtInput = document.getElementById('districtInput');
-            const districtIdStored = districtInput && districtInput.dataset && districtInput.dataset.districtId ? districtInput.dataset.districtId : null;
-            if (districtIdStored) {
-              params = `?district_id=${encodeURIComponent(districtIdStored)}` + (cityIdStored ? `&city_id=${encodeURIComponent(cityIdStored)}` : '');
-            } else if (cityIdStored) {
-              params = `?city_id=${encodeURIComponent(cityIdStored)}&district_name=${encodeURIComponent(v)}`;
-            } else if (cityVal && String(cityVal).match(/^\d+$/)) {
-              params = `?city_id=${encodeURIComponent(cityVal)}&district_name=${encodeURIComponent(v)}`;
-            } else if (cityVal) {
-              params = `?city_name=${encodeURIComponent(cityVal)}&district_name=${encodeURIComponent(v)}`;
-            } else {
-              params = `?district_name=${encodeURIComponent(v)}`;
-            }
-            const res = await fetch('/stats_district' + params);
-            if (!res.ok) {
-              // fallback: perform a broad search across all files for the provided district name
-              try {
-                const rr = await fetch('/stats_search_all?neighborhood=' + encodeURIComponent(v));
-                const txt = await rr.text();
-                let dd = null;
-                try { dd = txt ? JSON.parse(txt) : null; } catch (err) { dd = { __raw: txt }; }
-                if (rr.ok) {
-                  clearHighlight();
-                  showFeatureAndTable(dd);
-                } else {
-                  clearHighlight();
-                  document.getElementById('results').innerText = (dd && dd.__raw) ? dd.__raw : JSON.stringify(dd);
-                }
-              } catch (err) { console.error('fallback search error', err); }
-              return;
-            }
-            const data = await res.json();
-            // draw the district returned (scoped to city if possible)
-            clearHighlight();
-            showFeatureAndTable(data);
-          } catch (e) {
-            console.error('district lookup error', e);
-            try {
-              const rr = await fetch('/stats_search_all?neighborhood=' + encodeURIComponent(v));
-              const txt = await rr.text();
-              let dd = null;
-              try { dd = txt ? JSON.parse(txt) : null; } catch (err) { dd = { __raw: txt }; }
-              if (rr.ok) {
-                clearHighlight();
-                showFeatureAndTable(dd);
-              } else {
-                clearHighlight();
-                document.getElementById('results').innerText = (dd && dd.__raw) ? dd.__raw : JSON.stringify(dd);
-              }
-            } catch (err2) { console.error('fallback search error', err2); }
-          }
-        });
-
-        // suggestion-related UI removed
-
-        // initialize
-        loadRegions();
-        // Quick-search handlers
-        (function() {
-          const input = document.getElementById('quickSearch');
-          const resultsDiv = document.getElementById('quickResults');
-          const clearBtn = document.getElementById('quickClear');
-          let timer = null;
-
-          function renderSuggestions(items) {
-            resultsDiv.innerHTML = '';
-            if (!items || !items.length) { resultsDiv.style.display = 'none'; return; }
-            resultsDiv.style.display = 'block';
-            items.forEach(it => {
-              const row = document.createElement('div');
-              row.style.padding = '10px';
-              row.style.borderBottom = '1px solid #eef2f6';
-              row.style.display = 'flex';
-              row.style.gap = '10px';
-              row.style.cursor = 'pointer';
-              row.onmouseenter = () => row.style.background = '#f8fafc';
-              row.onmouseleave = () => row.style.background = 'transparent';
-
-              const thumb = document.createElement('div');
-              thumb.style.width = '64px';
-              thumb.style.height = '64px';
-              thumb.style.background = '#f3f4f6';
-              thumb.style.borderRadius = '6px';
-              thumb.style.flex = '0 0 64px';
-              thumb.style.display = 'flex';
-              thumb.style.alignItems = 'center';
-              thumb.style.justifyContent = 'center';
-              thumb.innerText = '🏙️';
-
-              const meta = document.createElement('div');
-              meta.style.flex = '1 1 auto';
-              const title = document.createElement('div');
-              title.style.fontWeight = '600';
-              title.style.marginBottom = '4px';
-              title.innerText = it.name_ar || it.name_en || it.name || '';
-              const sub = document.createElement('div');
-              sub.style.fontSize = '13px';
-              sub.style.color = '#6b7280';
-              // show parent info if present
-              // Determine a human-friendly Arabic type label from the file key
-              let kindLabel = '';
-              try {
-                const fk = (it.file_key || '').toLowerCase();
-                if (fk.indexOf('city') !== -1) kindLabel = 'المدينة';
-                else if (fk.indexOf('district') !== -1 || fk.indexOf('neigh') !== -1) kindLabel = 'الحي';
-                else if (fk.indexOf('region') !== -1) kindLabel = 'المنطقة';
-                else kindLabel = fk || '';
-              } catch (e) { kindLabel = it.file_key || ''; }
-
-              // Resolve region name if available in props (prefer region_id -> lookup)
-              let regionName = '';
-              if (it.props) {
-                if (it.props.region_name) regionName = it.props.region_name;
-                else if (it.props.region) regionName = it.props.region;
-                else if (it.props.region_id || it.props.regionId) {
-                  const rid = String(it.props.region_id || it.props.regionId);
-                  if (regionsById[rid]) regionName = regionsById[rid].name_ar || regionsById[rid].display || regionsById[rid].name_en || '';
-                }
-                // fallback: try name_ar or name_en in props
-                if (!regionName && (it.props.name_ar || it.props.name_en)) regionName = it.props.name_ar || it.props.name_en;
-              }
-
-              sub.innerText = `${kindLabel}${regionName ? ' · ' + regionName : ''}`;
-              meta.appendChild(title);
-              meta.appendChild(sub);
-
-              row.appendChild(thumb);
-              row.appendChild(meta);
-
-              row.addEventListener('click', async () => {
-                // On click, fetch the full feature from the file and show it
-                try {
-                  clearHighlight();
-                  resultsDiv.style.display = 'none';
-                  input.value = '';
-                  const fileKey = it.file_key;
-                  const name = it.name_ar || it.name_en || it.name || '';
-                  const res = await fetch('/stats_file_feature?file=' + encodeURIComponent(fileKey) + '&neighborhood=' + encodeURIComponent(name));
-                  if (!res.ok) {
-                    const txt = await res.text();
-                    document.getElementById('results').innerText = txt || 'feature not found';
-                    return;
-                  }
-                  const data = await res.json();
-                  // draw and show
-                  showFeatureAndTable(data);
-                } catch (e) {
-                  console.error('quick select error', e);
-                }
-              });
-
-              resultsDiv.appendChild(row);
             });
-          }
 
-          async function querySuggest(q) {
-            if (!q || !q.trim()) { renderSuggestions([]); return; }
-            try {
-              const r = await fetch('/search_suggest?q=' + encodeURIComponent(q) + '&limit=20');
-              if (!r.ok) { renderSuggestions([]); return; }
-              const js = await r.json();
-              const list = (js.suggestions || []).map(s => ({ file_key: s.file_key, id: s.id, name_ar: s.name_ar, name_en: s.name_en, props: s.props }));
-              renderSuggestions(list);
-            } catch (e) { console.error('suggest error', e); renderSuggestions([]); }
-          }
+            const citiesLayer = new GeoJSONLayer({
+                url: "/static/geojson/cities.geojson",
+                title: "المدن",
+                outFields: ["*"],
+                renderer: {
+                    type: "simple",
+                    symbol: {
+                        type: "simple-marker",
+                        size: 6,
+                        color: [0, 116, 217, 1],
+                        outline: {
+                            color: [255, 255, 255, 1],
+                            width: 0.5
+                        }
+                    }
+                }
+            });
 
-          input.addEventListener('input', function() {
-            if (timer) clearTimeout(timer);
-            const v = this.value;
-            timer = setTimeout(() => querySuggest(v), 300);
-          });
-          input.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') { input.value = ''; renderSuggestions([]); }
-          });
-          clearBtn.addEventListener('click', function() { input.value = ''; renderSuggestions([]); input.focus(); });
-        })();
-      });
+            const districtsLayer = new GeoJSONLayer({
+                url: "/static/geojson/districts.geojson",
+                title: "الأحياء",
+                outFields: ["*"],
+                renderer: {
+                    type: "simple",
+                    symbol: {
+                        type: "simple-fill",
+                        color: [255, 195, 0, 0.4],
+                        outline: {
+                            color: [255, 133, 27, 1],
+                            width: 0.5
+                        }
+                    }
+                }
+            });
+
+            const map = new Map({
+                basemap: "streets",
+                layers: [regionsLayer, districtsLayer, citiesLayer]
+            });
+
+            const view = new MapView({
+                container: "viewDiv",
+                map: map,
+                center: [45, 24], // وسط السعودية تقريبا
+                zoom: 6
+            });
+
+            const searchWidget = new Search({ view: view });
+            view.ui.add(searchWidget, "top-left");
+
+            // دالة عامة: فلترة الطبقة + zoom
+            function filterLayerByName(layer, fieldName, value) {
+                if (!value) {
+                    layer.definitionExpression = "1=1"; // رجع كل شيء
+                    return;
+                }
+
+                // فلترة بالاسم
+                const safeValue = value.replace(/'/g, "''"); // تهريب الابوستروف
+                layer.definitionExpression = `${fieldName} = '${safeValue}'`;
+
+                // Zoom على النتيجة
+                layer.when(() => {
+                    layer.queryExtent().then(function (res) {
+                        if (res.extent) {
+                            view.goTo(res.extent.expand(1.2));
+                        }
+                    });
+                });
+            }
+
+            // ربط الدروب داون بالماب
+            document.getElementById("regions-dropdown").addEventListener("change", function (e) {
+                const selected = e.target.value;
+                filterLayerByName(regionsLayer, REGION_NAME_FIELD, selected);
+            });
+
+            document.getElementById("cities-dropdown").addEventListener("change", function (e) {
+                const selected = e.target.value;
+                filterLayerByName(citiesLayer, CITY_NAME_FIELD, selected);
+            });
+
+            document.getElementById("districts-dropdown").addEventListener("change", function (e) {
+                const selected = e.target.value;
+                filterLayerByName(districtsLayer, DISTRICT_NAME_FIELD, selected);
+            });
+        });
     </script>
-  </body>
+</body>
 </html>
